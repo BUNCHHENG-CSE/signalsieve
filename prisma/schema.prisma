@@ -1,0 +1,102 @@
+// =============================================================================
+// SignalSieve — Local SQLite Prisma Schema (Development)
+// Zero-config, offline-first, embedded database
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ClusteringConfig {
+  id                      Int      @id @default(1)
+  time_window_minutes     Int      @default(15)
+  entity_weight           Float    @default(0.45)
+  service_topology_weight Float    @default(0.30)
+  text_similarity_weight  Float    @default(0.25)
+  similarity_threshold    Float    @default(0.42)
+  llm_provider            String   @default("deterministic")
+  llm_api_key             String   @default("")
+  llm_model               String   @default("gpt-4o-mini")
+  updated_at              DateTime @default(now()) @updatedAt
+
+  @@map("clustering_config")
+}
+
+model Cluster {
+  id                    String     @id
+  title                 String
+  context_summary       String
+  root_cause_hypothesis String
+  recommended_action    String
+  summary_source        String     @default("deterministic")
+  status                String     @default("open")
+  urgency_score         Float      @default(50)
+  blast_radius_score    Float      @default(50)
+  ranking_breakdown     Json
+  dependency_graph      Json
+  alert_count           Int        @default(1)
+  sources               Json
+  services              Json
+  entities              Json
+  highest_severity      String
+  environment           String
+  first_seen            DateTime   @default(now())
+  last_seen             DateTime   @default(now())
+  pattern_signature     String
+
+  alerts                RawAlert[]
+
+  @@index([status, urgency_score, blast_radius_score, last_seen], map: "idx_clusters_triage_priority")
+  @@index([last_seen, pattern_signature], map: "idx_clusters_window_sig")
+  @@map("clusters")
+}
+
+model SuppressionRule {
+  id                String     @id
+  name              String
+  pattern_signature String
+  match_criteria    Json
+  reason            String
+  created_by        String
+  created_at        DateTime   @default(now())
+  expires_at        DateTime
+  is_active         Boolean    @default(true)
+  suppressed_count  Int        @default(0)
+
+  alerts            RawAlert[]
+
+  @@index([pattern_signature, expires_at], map: "idx_suppression_rules_sig_exp")
+  @@map("suppression_rules")
+}
+
+model RawAlert {
+  id                  String           @id
+  source              String
+  external_id         String
+  timestamp           DateTime         @default(now())
+  ingested_at         DateTime         @default(now())
+  title               String
+  description         String
+  severity            String
+  service             String
+  environment         String
+  host                String
+  entity_tags         Json
+  fingerprint         String
+  cluster_id          String?
+  suppressed          Boolean          @default(false)
+  suppression_rule_id String?
+  raw_payload         Json
+
+  cluster             Cluster?         @relation(fields: [cluster_id], references: [id], onDelete: SetNull)
+  suppression_rule    SuppressionRule? @relation(fields: [suppression_rule_id], references: [id], onDelete: SetNull)
+
+  @@index([cluster_id, timestamp], map: "idx_raw_alerts_cluster_timeline")
+  @@index([service, fingerprint, timestamp], map: "idx_raw_alerts_service_fingerprint")
+  @@map("raw_alerts")
+}
