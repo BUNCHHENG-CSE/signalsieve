@@ -62,6 +62,24 @@ const CORRELATION_ENTITY_KEYS = [
   "partner_host",
 ];
 
+// Alerts are compared against many cluster members; cache each alert's token set
+// so it is tokenized once instead of once per pair. Keyed by object identity and
+// invalidated if the text it was derived from changes.
+const tokenCache = new WeakMap<object, { key: string; tokens: Set<string> }>();
+
+function getAlertTokens(alert: {
+  title: string;
+  description: string;
+  entity_tags: Record<string, string>;
+}): Set<string> {
+  const key = `${alert.title} ${alert.description} ${Object.values(alert.entity_tags || {}).join(" ")}`;
+  const cached = tokenCache.get(alert);
+  if (cached && cached.key === key) return cached.tokens;
+  const tokens = tokenizeText(key);
+  tokenCache.set(alert, { key, tokens });
+  return tokens;
+}
+
 export function computePairCorrelation(
   alertA: {
     timestamp: string;
@@ -142,13 +160,7 @@ export function computePairCorrelation(
   }
 
   // 3. Text / Token Similarity Score (0 - 1)
-  const tokensA = tokenizeText(
-    `${alertA.title} ${alertA.description} ${Object.values(alertA.entity_tags || {}).join(" ")}`
-  );
-  const tokensB = tokenizeText(
-    `${alertB.title} ${alertB.description} ${Object.values(alertB.entity_tags || {}).join(" ")}`
-  );
-  let textScore = jaccardSimilarity(tokensA, tokensB);
+  let textScore = jaccardSimilarity(getAlertTokens(alertA), getAlertTokens(alertB));
   if (
     alertA.fingerprint &&
     alertB.fingerprint &&
